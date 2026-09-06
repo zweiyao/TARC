@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from serl_launcher.common.common import JaxRLTrainState, ModuleDict, nonpytree_field
 from serl_launcher.common.encoding import EncodingWrapper
+from serl_launcher.networks.temporal_encoder import TemporalConvEncoder
 from serl_launcher.common.optimizers import make_optimizer
 from serl_launcher.common.typing import Batch, Data, Params, PRNGKey
 from serl_launcher.networks.actor_critic_nets import Critic, Policy, ensemblize
@@ -454,6 +455,8 @@ class SACAgent(flax.struct.PyTreeNode):
         temperature_init: float = 1.0,
         image_keys: Iterable[str] = ("image",),
         augmentation_function: Optional[callable] = None,
+        temporal_key: Optional[str] = None,
+        temporal_encoder_kwargs: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -498,11 +501,21 @@ class SACAgent(flax.struct.PyTreeNode):
         else:
             raise NotImplementedError(f"Unknown encoder type: {encoder_type}")
 
+        if temporal_key is not None:
+            temporal_encoder = TemporalConvEncoder(
+                **(temporal_encoder_kwargs or {}),
+                name="temporal_encoder",
+            )
+        else:
+            temporal_encoder = None
+
         encoder_def = EncodingWrapper(
             encoder=encoders,
             use_proprio=use_proprio,
             enable_stacking=True,
             image_keys=image_keys,
+            temporal_key=temporal_key,
+            temporal_encoder=temporal_encoder,
         )
 
         encoders = {
@@ -545,6 +558,7 @@ class SACAgent(flax.struct.PyTreeNode):
             critic_subsample_size=critic_subsample_size,
             image_keys=image_keys,
             augmentation_function=augmentation_function,
+            temporal_key=temporal_key,
             **kwargs,
         )
 

@@ -56,6 +56,8 @@ def make_sac_pixel_agent(
     reward_bias=0.0,
     target_entropy=None,
     discount=0.97,
+    temporal_key=None,
+    temporal_encoder_kwargs=None,
 ):
     agent = SACAgent.create_pixels(
         jax.random.PRNGKey(seed),
@@ -88,6 +90,8 @@ def make_sac_pixel_agent(
         reward_bias=reward_bias,
         target_entropy=target_entropy,
         augmentation_function=make_batch_augmentation_func(image_keys),
+        temporal_key=temporal_key,
+        temporal_encoder_kwargs=temporal_encoder_kwargs,
     )
     return agent
 

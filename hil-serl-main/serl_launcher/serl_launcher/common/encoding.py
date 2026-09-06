@@ -15,6 +15,9 @@ class EncodingWrapper(nn.Module):
     Args:
         encoder: The encoder network.
         use_proprio: Whether to concatenate proprioception (after encoding).
+        temporal_key: Observation key holding a (..., T, C) time series. None
+            disables the branch entirely.
+        temporal_encoder: Module encoding that series into a flat vector.
     """
 
     encoder: nn.Module
@@ -22,6 +25,9 @@ class EncodingWrapper(nn.Module):
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
+    temporal_key: Optional[str] = None
+    temporal_encoder: Optional[nn.Module] = None
+    temporal_stop_gradient: bool = False
 
     @nn.compact
     def __call__(
@@ -68,5 +74,25 @@ class EncodingWrapper(nn.Module):
             state = nn.LayerNorm()(state)
             state = nn.tanh(state)
             encoded = jnp.concatenate([encoded, state], axis=-1)
+
+        if self.temporal_key is not None:
+            assert (
+                self.temporal_encoder is not None
+            ), "temporal_key is set but temporal_encoder is None"
+            series = observations[self.temporal_key]
+            if self.enable_stacking:
+                # Fold the obs-stacking axis into the time axis
+                if len(series.shape) == 3:
+                    series = rearrange(series, "S T C -> (S T) C")
+                    encoded = encoded.reshape(-1)
+                if len(series.shape) == 4:
+                    series = rearrange(series, "B S T C -> B (S T) C")
+
+            series = self.temporal_encoder(series, train=train)
+
+            if stop_gradient and self.temporal_stop_gradient:
+                series = jax.lax.stop_gradient(series)
+
+            encoded = jnp.concatenate([encoded, series], axis=-1)
 
         return encoded

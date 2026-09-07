@@ -30,6 +30,10 @@ class DefaultTrainingConfig:
     eval_n_trajs: int = 5
 
     image_keys: List[str] = None
+    # Encoded by the same shared ResNet trunk as image_keys but kept out of it,
+    # so they skip the crop augmentation and the buffer's frame reuse.
+    tactile_keys: List[str] = ()
+    action_chunk_key: str = None
     classifier_keys: List[str] = None
     proprio_keys: List[str] = None
     

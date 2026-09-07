@@ -501,10 +501,13 @@ class SACAgent(flax.struct.PyTreeNode):
                 for image_key in image_keys
             }
             # Same pretrained_encoder instance, so the frozen trunk stays a
-            # single set of parameters. Only the per-head preprocessing differs:
-            # tactile keeps its native resolution and skips the ImageNet mean
-            # shift, both of which are camera-specific.
-            tactile_defaults = {"normalize": "unit", "do_resize": False}
+            # single set of parameters. What differs per head is preprocessing:
+            # tactile keeps its native resolution instead of being squeezed to
+            # 128x128. It does keep the ImageNet normalization, because the
+            # trunk is ImageNet-pretrained and permanently frozen
+            # (resnet_v1.py:287) — feeding it a different input distribution
+            # than it was trained on is the riskier side of that trade.
+            tactile_defaults = {"normalize": "imagenet", "do_resize": False}
             tactile_defaults.update(tactile_encoder_kwargs or {})
             encoders.update(
                 {

@@ -7,7 +7,16 @@ runs one update() step. No robot, no hil-serl server, no demo data.
 Needs the pi0.5 policy server running first:  bash vla/serve_pi05.sh
 
     python -m examples.test.test_temporal_obs_dataflow   # from hil-serl-main/
+    python examples/test/test_temporal_obs_dataflow.py   # works too
 """
+import sys
+from pathlib import Path
+
+# Running this by file path puts examples/test/ on sys.path rather than the repo
+# root, so `vla` would not resolve. Put the repo root on the path ourselves so
+# every invocation style works.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import numpy as np
 import jax
 from flax.core import frozen_dict

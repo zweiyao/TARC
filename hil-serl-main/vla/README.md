@@ -73,6 +73,7 @@ Then, with the server on GPU 0, run the test on a different GPU:
 ```bash
 cd ~/holmes/tarc/hil-serl-main && CUDA_VISIBLE_DEVICES=1 \
   ~/miniconda3/envs/tarc/bin/python -m examples.test.test_temporal_obs_dataflow
+# or:  python examples/test/test_temporal_obs_dataflow.py
 ```
 
 Both sides preallocate 75% of a GPU by default, so they must not share one.

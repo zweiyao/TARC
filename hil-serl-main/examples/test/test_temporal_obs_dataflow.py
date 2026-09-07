@@ -15,7 +15,11 @@ from flax.core import frozen_dict
 from serl_launcher.utils.launcher import make_sac_pixel_agent
 from vla import pi05_client
 
-IMAGE_KEYS = ["wrist_1", "wrist_2"]
+IMAGE_KEYS = ["wrist_1", "wrist_2", "tactile"]
+# Cameras are already 128x128 by the time they reach the policy (franka_env.py:263
+# crops then resizes). The tactile sensor is not — its native 240x320 hits the
+# silent bilinear resize at resnet_v1.py:220, which no camera has ever triggered.
+IMAGE_SHAPES = {"wrist_1": (128, 128, 3), "wrist_2": (128, 128, 3), "tactile": (240, 320, 3)}
 STATE_DIM = 19  # tcp_pose 6 + tcp_vel 6 + tcp_force 3 + tcp_torque 3 + gripper 1
 ACTION_DIM = 6
 TEMPORAL_KEY = "series"
@@ -26,7 +30,7 @@ def base_obs(batch=None):
     """Same shapes the wrapper chain would produce; see smoke_learner.py."""
     lead = (1,) if batch is None else (batch, 1)
     return {
-        **{k: np.zeros(lead + (128, 128, 3), np.uint8) for k in IMAGE_KEYS},
+        **{k: np.zeros(lead + IMAGE_SHAPES[k], np.uint8) for k in IMAGE_KEYS},
         "state": np.zeros(lead + (STATE_DIM,), np.float32),
     }
 
@@ -52,6 +56,14 @@ agent = make_sac_pixel_agent(
     image_keys=IMAGE_KEYS,
     temporal_key=TEMPORAL_KEY,
 )
+
+p = agent.state.params["modules_actor"]
+# 240x320 was resized to 128x128, giving the same 4x4x512 map as the cameras.
+assert p["encoder"]["encoder_tactile"]["SpatialLearnedEmbeddings_0"]["kernel"].shape == (
+    4, 4, 512, 8,
+)
+# 512 (2 cams) + 256 (tactile) + 64 (state) + 64 (series) = 896
+assert p["network"]["Dense_0"]["kernel"].shape[0] == 896
 
 action = agent.sample_actions(make_obs(), seed=jax.random.PRNGKey(0), argmax=True)
 assert action.shape == (ACTION_DIM,), action.shape

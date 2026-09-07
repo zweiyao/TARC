@@ -24,6 +24,7 @@ from flax.core import frozen_dict
 
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.utils.launcher import make_sac_pixel_agent
+from tactile import synth as tactile_synth
 from vla import pi05_client
 
 IMAGE_KEYS = ["wrist_1", "wrist_2"]
@@ -47,10 +48,24 @@ def base_obs(batch=None):
     """Same shapes the wrapper chain would produce; see smoke_learner.py."""
     lead = (1,) if batch is None else (batch, 1)
     return {
-        **{k: np.zeros(lead + OBS_SHAPES[k], np.uint8) for k in IMAGE_KEYS + TACTILE_KEYS},
+        **{k: np.zeros(lead + OBS_SHAPES[k], np.uint8) for k in IMAGE_KEYS},
         "state": np.zeros(lead + (STATE_DIM,), np.float32),
     }
 
+
+# Synthetic speckle through flow.py's real Farneback pipeline. Computed once at
+# module level: the flow costs ~30ms and make_obs() is called a dozen times.
+REF, CUR, TRUE_PEAK = tactile_synth.press(peak_px=2.5)
+MAG = tactile_synth.magnitude(CUR, REF)
+# The displacement was applied here, so the flow can be checked against it
+# rather than merely not crashing. Tolerance measured, not guessed: 2.478 vs
+# 2.500 on this data. The rest frame pins the noise floor at the other end —
+# without it, a flow that returned garbage everywhere would still pass above.
+assert abs(MAG.max() - TRUE_PEAK) < 0.15, (MAG.max(), TRUE_PEAK)
+assert tactile_synth.magnitude(REF[0], REF).max() < 0.1
+HEAT = tactile_synth.heatmap(CUR, REF)
+assert HEAT.shape == OBS_SHAPES["tactile"] and HEAT.dtype == np.uint8, HEAT.shape
+print(f"tactile: applied {TRUE_PEAK:.2f}px -> flow {MAG.max():.3f}px, heatmap {HEAT.shape}")
 
 # The chunk's own shape drives every series below, so a mismatch between the
 # config's action_horizon and what the model actually returns cannot desync the
@@ -62,6 +77,8 @@ print("vla chunk:", CHUNK.shape, CHUNK.dtype)
 def make_obs(batch=None):
     obs = base_obs(batch)
     lead = obs["state"].shape[:-1]
+    for k in TACTILE_KEYS:
+        obs[k] = np.broadcast_to(HEAT, lead + HEAT.shape)
     obs[TEMPORAL_KEY] = np.broadcast_to(CHUNK, lead + CHUNK.shape).astype(np.float32)
     return obs
 

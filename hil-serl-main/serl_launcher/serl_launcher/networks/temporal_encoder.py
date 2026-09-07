@@ -28,8 +28,9 @@ class TemporalConvEncoder(nn.Module):
     # Critic.__call__ does not forward `train`, so dropout would make the actor
     # and critic passes disagree. Left off by default.
     dropout_rate: Optional[float] = None
-    # Raw force/tactile readings can be orders of magnitude above 1 and would
-    # saturate the tanh. Divide them down here when real data is wired up.
+    # Whatever series is fed in may be orders of magnitude above 1 and would
+    # saturate the tanh. pi0.5 action chunks are already roughly in [-1, 1], so
+    # 1.0 is right for the current caller; raw sensor readings would not be.
     input_scale: float = 1.0
 
     @nn.compact

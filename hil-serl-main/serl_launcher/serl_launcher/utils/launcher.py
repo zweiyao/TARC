@@ -56,6 +56,8 @@ def make_sac_pixel_agent(
     reward_bias=0.0,
     target_entropy=None,
     discount=0.97,
+    tactile_keys=(),
+    tactile_encoder_kwargs=None,
     temporal_key=None,
     temporal_encoder_kwargs=None,
 ):
@@ -66,6 +68,8 @@ def make_sac_pixel_agent(
         encoder_type=encoder_type,
         use_proprio=True,
         image_keys=image_keys,
+        tactile_keys=tactile_keys,
+        tactile_encoder_kwargs=tactile_encoder_kwargs,
         policy_kwargs={
             "tanh_squash_distribution": True,
             "std_parameterization": "exp",

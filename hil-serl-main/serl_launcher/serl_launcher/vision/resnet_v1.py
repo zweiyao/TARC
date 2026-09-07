@@ -214,16 +214,25 @@ class ResNetEncoder(nn.Module):
         train: bool = True,
         cond_var=None,
         stop_gradient=False,
+        normalize: str = "imagenet",
+        do_resize: bool = True,
     ):
-        # put inputs in [-1, 1]
-        # x = observations.astype(jnp.float32) / 127.5 - 1.0
-        if observations.shape[-3:-1] != self.image_size:
+        # normalize/do_resize are call-time args on purpose, not dataclass fields.
+        # This module is instantiated ONCE and shared by every encoder head
+        # (sac.py:487), which is what makes the trunk a single set of parameters.
+        # Any field difference would split it into two instances and silently
+        # double the trunk.
+        if do_resize and observations.shape[-3:-1] != self.image_size:
             observations = resize(observations, self.image_size)
 
-        # imagenet mean and std # TODO: add this back
-        mean = jnp.array([0.485, 0.456, 0.406])
-        std = jnp.array([0.229, 0.224, 0.225])
-        x = (observations.astype(jnp.float32) / 255.0 - mean) / std
+        x = observations.astype(jnp.float32) / 255.0
+        if normalize == "imagenet":
+            # imagenet mean and std # TODO: add this back
+            mean = jnp.array([0.485, 0.456, 0.406])
+            std = jnp.array([0.229, 0.224, 0.225])
+            x = (x - mean) / std
+        elif normalize != "unit":
+            raise ValueError(f"unknown normalize: {normalize}")
 
         if self.add_spatial_coordinates:
             x = AddSpatialCoordinates(dtype=self.dtype)(x)
@@ -331,6 +340,10 @@ class PreTrainedResNetEncoder(nn.Module):
     num_spatial_blocks: int = 8
     bottleneck_dim: Optional[int] = None
     pretrained_encoder: nn.module = None
+    # Per-head, so these are safe as fields — this module is built once per key.
+    # They are forwarded as call-time args to the shared trunk below.
+    normalize: str = "imagenet"
+    do_resize: bool = True
 
     @nn.compact
     def __call__(
@@ -341,7 +354,9 @@ class PreTrainedResNetEncoder(nn.Module):
     ):
         x = observations
         if encode:
-            x = self.pretrained_encoder(x, train=train)
+            x = self.pretrained_encoder(
+                x, train=train, normalize=self.normalize, do_resize=self.do_resize
+            )
 
         if self.pooling_method == "spatial_learned_embeddings":
             height, width, channel = x.shape[-3:]

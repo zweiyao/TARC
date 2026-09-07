@@ -15,6 +15,10 @@ class EncodingWrapper(nn.Module):
     Args:
         encoder: The encoder network.
         use_proprio: Whether to concatenate proprioception (after encoding).
+        tactile_keys: Keys encoded by the same shared ResNet trunk as the
+            cameras, but kept out of image_keys so they skip the crop
+            augmentation and the replay buffer's frame reuse. Their encoders
+            carry their own normalize/do_resize settings.
         temporal_key: Observation key holding a (..., T, C) time series. None
             disables the branch entirely.
         temporal_encoder: Module encoding that series into a flat vector.
@@ -25,6 +29,7 @@ class EncodingWrapper(nn.Module):
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
+    tactile_keys: Iterable[str] = ()
     temporal_key: Optional[str] = None
     temporal_encoder: Optional[nn.Module] = None
     temporal_stop_gradient: bool = False
@@ -55,6 +60,27 @@ class EncodingWrapper(nn.Module):
                 image = jax.lax.stop_gradient(image)
 
             encoded.append(image)
+
+        # Same encoder dict, so the frozen trunk stays shared; what differs is
+        # the per-head normalize/do_resize set in sac.py. Placed before the
+        # concat so the reshape(-1) in the branches below flattens it too on the
+        # no-batch inference path.
+        for tactile_key in self.tactile_keys:
+            tactile = observations[tactile_key]
+            if not is_encoded and self.enable_stacking:
+                if len(tactile.shape) == 4:
+                    tactile = rearrange(tactile, "T H W C -> H W (T C)")
+                if len(tactile.shape) == 5:
+                    tactile = rearrange(tactile, "B T H W C -> B H W (T C)")
+
+            tactile = self.encoder[tactile_key](
+                tactile, train=train, encode=not is_encoded
+            )
+
+            if stop_gradient:
+                tactile = jax.lax.stop_gradient(tactile)
+
+            encoded.append(tactile)
 
         encoded = jnp.concatenate(encoded, axis=-1)
 

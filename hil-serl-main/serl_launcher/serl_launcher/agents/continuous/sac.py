@@ -454,6 +454,8 @@ class SACAgent(flax.struct.PyTreeNode):
         critic_subsample_size: Optional[int] = None,
         temperature_init: float = 1.0,
         image_keys: Iterable[str] = ("image",),
+        tactile_keys: Iterable[str] = (),
+        tactile_encoder_kwargs: Optional[dict] = None,
         augmentation_function: Optional[callable] = None,
         temporal_key: Optional[str] = None,
         temporal_encoder_kwargs: Optional[dict] = None,
@@ -498,6 +500,25 @@ class SACAgent(flax.struct.PyTreeNode):
                 )
                 for image_key in image_keys
             }
+            # Same pretrained_encoder instance, so the frozen trunk stays a
+            # single set of parameters. Only the per-head preprocessing differs:
+            # tactile keeps its native resolution and skips the ImageNet mean
+            # shift, both of which are camera-specific.
+            tactile_defaults = {"normalize": "unit", "do_resize": False}
+            tactile_defaults.update(tactile_encoder_kwargs or {})
+            encoders.update(
+                {
+                    tactile_key: PreTrainedResNetEncoder(
+                        pooling_method="spatial_learned_embeddings",
+                        num_spatial_blocks=8,
+                        bottleneck_dim=256,
+                        pretrained_encoder=pretrained_encoder,
+                        name=f"encoder_{tactile_key}",
+                        **tactile_defaults,
+                    )
+                    for tactile_key in tactile_keys
+                }
+            )
         else:
             raise NotImplementedError(f"Unknown encoder type: {encoder_type}")
 
@@ -514,6 +535,7 @@ class SACAgent(flax.struct.PyTreeNode):
             use_proprio=use_proprio,
             enable_stacking=True,
             image_keys=image_keys,
+            tactile_keys=tactile_keys,
             temporal_key=temporal_key,
             temporal_encoder=temporal_encoder,
         )

@@ -149,16 +149,24 @@ def load_resnet10_params(agent, image_keys=("image",), public=True):
 
     new_params = agent.state.params
 
-    for image_key in image_keys:
-        new_encoder_params = new_params["modules_actor"]["encoder"][
-            f"encoder_{image_key}"
-        ]
-        if "pretrained_encoder" in new_encoder_params:
-            new_encoder_params = new_encoder_params["pretrained_encoder"]
-        for k in new_encoder_params:
+    # Scan every encoder head rather than indexing by image_keys. The trunk is
+    # shared, so Flax stores it under whichever encoder_* key sorts first — which
+    # need not be one of the keys we were handed. Indexing by image_keys loaded
+    # nothing at all, silently, once tactile moved to its own key list.
+    replaced = 0
+    for head in new_params["modules_actor"]["encoder"].values():
+        if not hasattr(head, "keys") or "pretrained_encoder" not in head:
+            continue
+        trunk = head["pretrained_encoder"]
+        for k in trunk:
             if k in encoder_params:
-                new_encoder_params[k] = encoder_params[k]
+                trunk[k] = encoder_params[k]
+                replaced += 1
                 print(f"replaced {k} in pretrained_encoder")
+    assert replaced, (
+        "no pretrained ResNet-10 weights were loaded — the trunk would stay "
+        "randomly initialised and frozen"
+    )
 
     agent = agent.replace(state=agent.state.replace(params=new_params))
     return agent

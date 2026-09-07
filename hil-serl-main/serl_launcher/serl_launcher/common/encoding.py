@@ -19,9 +19,11 @@ class EncodingWrapper(nn.Module):
             cameras, but kept out of image_keys so they skip the crop
             augmentation and the replay buffer's frame reuse. Their encoders
             carry their own normalize/do_resize settings.
-        temporal_key: Observation key holding a (..., T, C) time series. None
-            disables the branch entirely.
-        temporal_encoder: Module encoding that series into a flat vector.
+        action_chunk_key: Observation key holding a (..., T, C) time series —
+            currently the pi0.5 action chunk. None disables the branch.
+            Named for its caller, not its shape: the encoder underneath is a
+            generic series encoder and would take any (..., T, C).
+        action_chunk_encoder: Module encoding that series into a flat vector.
     """
 
     encoder: nn.Module
@@ -30,9 +32,9 @@ class EncodingWrapper(nn.Module):
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
     tactile_keys: Iterable[str] = ()
-    temporal_key: Optional[str] = None
-    temporal_encoder: Optional[nn.Module] = None
-    temporal_stop_gradient: bool = False
+    action_chunk_key: Optional[str] = None
+    action_chunk_encoder: Optional[nn.Module] = None
+    action_chunk_stop_gradient: bool = False
 
     @nn.compact
     def __call__(
@@ -101,11 +103,11 @@ class EncodingWrapper(nn.Module):
             state = nn.tanh(state)
             encoded = jnp.concatenate([encoded, state], axis=-1)
 
-        if self.temporal_key is not None:
+        if self.action_chunk_key is not None:
             assert (
-                self.temporal_encoder is not None
-            ), "temporal_key is set but temporal_encoder is None"
-            series = observations[self.temporal_key]
+                self.action_chunk_encoder is not None
+            ), "action_chunk_key is set but action_chunk_encoder is None"
+            series = observations[self.action_chunk_key]
             if self.enable_stacking:
                 # Fold the obs-stacking axis into the time axis
                 if len(series.shape) == 3:
@@ -114,9 +116,9 @@ class EncodingWrapper(nn.Module):
                 if len(series.shape) == 4:
                     series = rearrange(series, "B S T C -> B (S T) C")
 
-            series = self.temporal_encoder(series, train=train)
+            series = self.action_chunk_encoder(series, train=train)
 
-            if stop_gradient and self.temporal_stop_gradient:
+            if stop_gradient and self.action_chunk_stop_gradient:
                 series = jax.lax.stop_gradient(series)
 
             encoded = jnp.concatenate([encoded, series], axis=-1)

@@ -40,7 +40,7 @@ OBS_SHAPES = {
 }
 STATE_DIM = 19  # tcp_pose 6 + tcp_vel 6 + tcp_force 3 + tcp_torque 3 + gripper 1
 ACTION_DIM = 6
-TEMPORAL_KEY = "series"
+ACTION_CHUNK_KEY = "series"
 BATCH = 4
 
 
@@ -79,7 +79,7 @@ def make_obs(batch=None):
     lead = obs["state"].shape[:-1]
     for k in TACTILE_KEYS:
         obs[k] = np.broadcast_to(HEAT, lead + HEAT.shape)
-    obs[TEMPORAL_KEY] = np.broadcast_to(CHUNK, lead + CHUNK.shape).astype(np.float32)
+    obs[ACTION_CHUNK_KEY] = np.broadcast_to(CHUNK, lead + CHUNK.shape).astype(np.float32)
     return obs
 
 
@@ -94,7 +94,7 @@ agent = make_sac_pixel_agent(
     sample_action=np.zeros((ACTION_DIM,), np.float32),
     image_keys=IMAGE_KEYS,
     tactile_keys=TACTILE_KEYS,
-    temporal_key=TEMPORAL_KEY,
+    action_chunk_key=ACTION_CHUNK_KEY,
 )
 
 p = agent.state.params["modules_actor"]
@@ -140,7 +140,7 @@ other = make_sac_pixel_agent(
     sample_action=np.zeros((ACTION_DIM,), np.float32),
     image_keys=IMAGE_KEYS,
     tactile_keys=TACTILE_KEYS,
-    temporal_key=TEMPORAL_KEY,
+    action_chunk_key=ACTION_CHUNK_KEY,
 )
 trunk_of = lambda a: a.state.params["modules_actor"]["encoder"][trunks[0]][
     "pretrained_encoder"
@@ -158,14 +158,14 @@ buf = MemoryEfficientReplayBufferDataStore(
         {
             **{k: space(OBS_SHAPES[k], np.uint8, 0, 255) for k in IMAGE_KEYS + TACTILE_KEYS},
             "state": space((STATE_DIM,), np.float32, -np.inf, np.inf),
-            TEMPORAL_KEY: space(CHUNK.shape, np.float32, -np.inf, np.inf),
+            ACTION_CHUNK_KEY: space(CHUNK.shape, np.float32, -np.inf, np.inf),
         }
     ),
     action_space=gym.spaces.Box(-1, 1, (ACTION_DIM,), np.float32),
     capacity=16,
     image_keys=IMAGE_KEYS,
 )
-assert TEMPORAL_KEY not in buf.pixel_keys and TACTILE_KEYS[0] not in buf.pixel_keys
+assert ACTION_CHUNK_KEY not in buf.pixel_keys and TACTILE_KEYS[0] not in buf.pixel_keys
 for _ in range(8):
     buf.insert(
         dict(

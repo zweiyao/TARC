@@ -457,8 +457,8 @@ class SACAgent(flax.struct.PyTreeNode):
         tactile_keys: Iterable[str] = (),
         tactile_encoder_kwargs: Optional[dict] = None,
         augmentation_function: Optional[callable] = None,
-        temporal_key: Optional[str] = None,
-        temporal_encoder_kwargs: Optional[dict] = None,
+        action_chunk_key: Optional[str] = None,
+        action_chunk_encoder_kwargs: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -525,13 +525,13 @@ class SACAgent(flax.struct.PyTreeNode):
         else:
             raise NotImplementedError(f"Unknown encoder type: {encoder_type}")
 
-        if temporal_key is not None:
-            temporal_encoder = TemporalConvEncoder(
-                **(temporal_encoder_kwargs or {}),
-                name="temporal_encoder",
+        if action_chunk_key is not None:
+            action_chunk_encoder = TemporalConvEncoder(
+                **(action_chunk_encoder_kwargs or {}),
+                name="action_chunk_encoder",
             )
         else:
-            temporal_encoder = None
+            action_chunk_encoder = None
 
         encoder_def = EncodingWrapper(
             encoder=encoders,
@@ -539,8 +539,8 @@ class SACAgent(flax.struct.PyTreeNode):
             enable_stacking=True,
             image_keys=image_keys,
             tactile_keys=tactile_keys,
-            temporal_key=temporal_key,
-            temporal_encoder=temporal_encoder,
+            action_chunk_key=action_chunk_key,
+            action_chunk_encoder=action_chunk_encoder,
         )
 
         encoders = {
@@ -583,7 +583,7 @@ class SACAgent(flax.struct.PyTreeNode):
             critic_subsample_size=critic_subsample_size,
             image_keys=image_keys,
             augmentation_function=augmentation_function,
-            temporal_key=temporal_key,
+            action_chunk_key=action_chunk_key,
             **kwargs,
         )
 

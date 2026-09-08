@@ -18,10 +18,18 @@ class SERLObsWrapper(gym.ObservationWrapper):
             {key: self.env.observation_space["state"][key] for key in self.proprio_keys}
         )
 
+        # Anything that is neither "state" nor "images" used to be dropped here
+        # without a word, so a non-image modality could be added upstream and
+        # simply never arrive. Carry it through untouched instead.
+        self.extra_keys = [
+            k for k in self.env.observation_space.spaces if k not in ("state", "images")
+        ]
+
         self.observation_space = gym.spaces.Dict(
             {
                 "state": flatten_space(self.proprio_space),
                 **(self.env.observation_space["images"]),
+                **{k: self.env.observation_space[k] for k in self.extra_keys},
             }
         )
 
@@ -32,6 +40,7 @@ class SERLObsWrapper(gym.ObservationWrapper):
                 {key: obs["state"][key] for key in self.proprio_keys},
             ),
             **(obs["images"]),
+            **{k: obs[k] for k in self.extra_keys},
         }
         return obs
 
@@ -40,11 +49,15 @@ class SERLObsWrapper(gym.ObservationWrapper):
         return self.observation(obs), info
 
 def flatten_observations(obs, proprio_space, proprio_keys):
+        # Mirrors SERLObsWrapper.observation for replayed transitions; it has to
+        # keep the extra keys too or replay silently disagrees with rollout.
+        extra = {k: v for k, v in obs.items() if k not in ("state", "images")}
         obs = {
             "state": flatten(
                 proprio_space,
                 {key: obs["state"][key] for key in proprio_keys},
             ),
             **(obs["images"]),
+            **extra,
         }
         return obs

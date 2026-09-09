@@ -273,12 +273,15 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     """
     The learner loop, which runs when "--learner" is set to True.
     """
-    start_step = (
-        int(os.path.basename(checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path)))[11:])
-        + 1
+    # Same shape as the actor's, and the same trap: the directory can exist with
+    # no checkpoint_* inside it (the actor creates it for buffer dumps long
+    # before the learner saves), and basename(None) raises.
+    _latest = (
+        checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
         if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else 0
+        else None
     )
+    start_step = int(os.path.basename(_latest)[11:]) + 1 if _latest else 0
     step = start_step
 
     def stats_callback(type: str, payload: dict) -> dict:
@@ -466,10 +469,13 @@ def main(_):
             agent.state,
         )
         agent = agent.replace(state=ckpt)
-        ckpt_number = os.path.basename(
-            checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
-        )[11:]
-        print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
+        # latest_checkpoint returns None when the directory exists but holds no
+        # checkpoint_* yet — os.path.basename(None) then raises TypeError.
+        _latest = checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
+        if _latest is None:
+            print_green("Checkpoint directory has no checkpoint yet; starting fresh.")
+        else:
+            print_green(f"Loaded previous checkpoint at step {os.path.basename(_latest)[11:]}.")
 
     def create_replay_buffer_and_wandb_logger():
         replay_buffer = MemoryEfficientReplayBufferDataStore(

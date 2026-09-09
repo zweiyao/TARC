@@ -71,7 +71,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/healthz   # 200 =
 Then, with the server on GPU 0, run the test on a different GPU:
 
 ```bash
-cd ~/holmes/tarc/hil-serl-main && CUDA_VISIBLE_DEVICES=1 \
+cd ~/holmes/tarc && CUDA_VISIBLE_DEVICES=1 \
   ~/miniconda3/envs/tarc/bin/python -m examples.test.test_temporal_obs_dataflow
 ```
 

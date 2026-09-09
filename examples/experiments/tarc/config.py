@@ -33,6 +33,11 @@ STATE_DIM = 19
 # rather than letting the mismatch surface as a numpy broadcast error on the
 # learner's first demo_buffer.insert.
 ACTION_CHUNK_T = 15
+
+# Control steps between pi0.5 inferences: 10 Hz policy / 2 Hz VLA. The policy
+# reads the latest published chunk on every step, so the same chunk appears in
+# five consecutive observations.
+VLA_EVERY = 5
 from experiments.tarc.wrapper import (
     TarcEnv,
     TactileVLAWrapper,
@@ -154,38 +159,16 @@ def _action_chunk_source(spaces_only=False):
         blank = np.zeros((ACTION_CHUNK_T, 8), np.float32)
         return lambda obs: blank
 
-    from vla import pi05_client
+    # Inference runs on a background thread and fires once every VLA_EVERY
+    # steps, so the control loop pays nothing for it; see vla/live.py. Kept
+    # outside the FAKE_SOURCES branch on purpose — the fake actor talks to a
+    # real pi0.5 service, which is what makes the 2 Hz cadence testable without
+    # an arm.
+    from vla.live import LiveActionChunkSource
 
-    client = pi05_client.connect()
-    zeros = np.zeros((1, 128, 128, 3), np.uint8)
-
-    def infer(obs):
-        if obs is None:  # probe call from TactileVLAWrapper, for the space only
-            state = np.zeros((1, STATE_DIM), np.float32)
-            frame = zeros
-        else:
-            state = np.concatenate(
-                [np.atleast_1d(obs["state"][k]).ravel() for k in
-                 ("tcp_pose", "tcp_vel", "tcp_force", "tcp_torque", "gripper_pose")]
-            )[None].astype(np.float32)
-            # The probe above claims STATE_DIM. If the two ever disagree the
-            # request silently carries different numbers than the space says,
-            # and pi05_client's slicing lands on the wrong fields.
-            assert state.shape[1] == STATE_DIM, (state.shape, STATE_DIM)
-            frame = None
-        req = {
-            "wrist_1": frame if frame is not None else obs["images"]["wrist_1"][None],
-            "wrist_2": frame if frame is not None else obs["images"]["wrist_2"][None],
-            "state": state,
-        }
-        chunk = pi05_client.infer(client, req).astype(np.float32)
-        assert chunk.shape[0] == ACTION_CHUNK_T, (
-            f"pi0.5 returned T={chunk.shape[0]}, but the learner's observation "
-            f"space assumes {ACTION_CHUNK_T}. Update ACTION_CHUNK_T."
-        )
-        return chunk
-
-    return infer
+    return LiveActionChunkSource(
+        every=VLA_EVERY, chunk_t=ACTION_CHUNK_T, state_dim=STATE_DIM
+    )
 
 
 class TrainConfig(DefaultTrainingConfig):

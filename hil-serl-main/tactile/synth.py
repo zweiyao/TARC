@@ -70,11 +70,14 @@ def magnitude(frame, ref_frames):
 
 
 def heatmap(frame, ref_frames, size=(320, 240), vmax=VMAX):
-    """Raw frame -> the uint8 BGR heatmap the `tactile` observation key wants.
+    """Raw frame -> the uint8 RGB heatmap the `tactile` observation key wants.
 
     `size` is OpenCV's (width, height), so the default returns (240, 320, 3).
     """
     heat = _colorize(magnitude(frame, ref_frames), vmax, cv2.COLORMAP_TURBO)
+    # RGB, matching what get_im() hands over for the cameras and what
+    # tactile/live.py produces; applyColorMap itself returns BGR.
+    heat = heat[..., ::-1]
     return cv2.resize(heat, size, interpolation=cv2.INTER_AREA)
 
 
@@ -109,5 +112,6 @@ if __name__ == "__main__":
     print(f"recovered peak    {mag.max():.3f} px   (err {abs(mag.max()-peak):.3f})")
     print(f"rest frame  mean  {rest.mean():.4f}  p99 {np.percentile(rest, 99):.4f}")
     out = sys.argv[1] if len(sys.argv) > 1 else "/tmp/tactile_heatmap.png"
-    cv2.imwrite(out, heatmap(cur, ref))
+    # heatmap() returns RGB; imwrite expects BGR.
+    cv2.imwrite(out, heatmap(cur, ref)[..., ::-1])
     print(f"heatmap {heatmap(cur, ref).shape} -> {out}")

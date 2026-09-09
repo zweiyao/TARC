@@ -17,7 +17,10 @@ class TarcEnv(FrankaEnv):
         # Imported here rather than at module scope: ram_insertion/wrapper.py:7
         # does it at the top, so merely importing that task fails on a headless
         # box, before anything gets a chance to decide it does not need a
-        # keyboard.
+        # keyboard. Skipped entirely for the learner, which has no operator —
+        # franka_env.py:174 guards its own listener the same way.
+        if kwargs.get("fake_env"):
+            return
         from pynput import keyboard
 
         def on_press(key):
@@ -210,6 +213,7 @@ class KeyboardRewardWrapper(gym.Wrapper):
         super().__init__(env)
         self.fallback = fallback
         self._pending = None
+        self._saw_key = False
         self.enabled = self._start_listener()
         if not self.enabled:
             print(
@@ -228,6 +232,13 @@ class KeyboardRewardWrapper(gym.Wrapper):
             return False
 
         def on_press(key):
+            # Listener.start() returning is not proof that events arrive — on
+            # macOS without accessibility permission it succeeds and then never
+            # fires, which looks exactly like nobody pressing anything. Say so
+            # once, so an operator who presses space and sees nothing knows.
+            if not self._saw_key:
+                self._saw_key = True
+                print("[KeyboardRewardWrapper] keyboard is live")
             if key == keyboard.Key.space:
                 self._pending = self.SUCCESS_REWARD
             elif getattr(key, "char", None) == "0":

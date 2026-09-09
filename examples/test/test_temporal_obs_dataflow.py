@@ -6,7 +6,7 @@ runs one update() step. No robot, no hil-serl server, no demo data.
 
 Needs the pi0.5 policy server running first:  bash vla/serve_pi05.sh
 
-    python -m examples.test.test_temporal_obs_dataflow   # from hil-serl-main/
+    python -m examples.test.test_temporal_obs_dataflow   # from the repo root
     python examples/test/test_temporal_obs_dataflow.py   # works too
 """
 import sys

@@ -84,5 +84,23 @@ moved = float(np.abs(env.unwrapped.currpos - before).max())
 print(f"step ok, reward={reward}, pose moved {moved:.4f}")
 assert moved > 0, "pose did not change — is the fake server stateful?"
 
+# The buffer's pixel_keys is storage only: tactile belongs in it (frame reuse
+# halves its footprint) even though it must stay out of image_keys, which is
+# what drives the crop augmentation. The two lists are wired separately in
+# train_rlpd_tarc.py, and nothing else would notice if they drifted apart.
+from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
+
+buf = MemoryEfficientReplayBufferDataStore(
+    env.observation_space,
+    env.action_space,
+    capacity=8,
+    image_keys=list(config.image_keys) + list(config.tactile_keys),
+)
+assert "tactile" in buf.pixel_keys, buf.pixel_keys
+assert "tactile" not in config.image_keys, config.image_keys
+stored = {k: v.nbytes for k, v in buf.dataset_dict["next_observations"].items()}
+assert "tactile" not in stored, "tactile still stored twice"
+print("buffer: tactile in pixel_keys, absent from next_observations (frame reuse)")
+
 env.close()
 print("OK")

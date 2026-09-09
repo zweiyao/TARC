@@ -404,6 +404,13 @@ def main(_):
     )
     env = RecordEpisodeStatistics(env)
 
+    # The buffer's pixel_keys is purely a storage optimisation — it decides
+    # which keys get the frame-reuse trick (store next_obs only, rebuild obs
+    # from the previous row) and has nothing to do with the encoder or the crop
+    # augmentation, both of which read image_keys. Handing tactile to the buffer
+    # too halves its footprint while the network stays untouched.
+    buffer_pixel_keys = list(config.image_keys) + list(config.tactile_keys)
+
     rng, sampling_rng = jax.random.split(rng)
     
     if config.setup_mode == 'single-arm-fixed-gripper' or config.setup_mode == 'dual-arm-fixed-gripper':   
@@ -469,7 +476,7 @@ def main(_):
             env.observation_space,
             env.action_space,
             capacity=config.replay_buffer_capacity,
-            image_keys=config.image_keys,
+            image_keys=buffer_pixel_keys,
             include_grasp_penalty=include_grasp_penalty,
         )
         # set up wandb and logging
@@ -487,7 +494,7 @@ def main(_):
             env.observation_space,
             env.action_space,
             capacity=config.replay_buffer_capacity,
-            image_keys=config.image_keys,
+            image_keys=buffer_pixel_keys,
             include_grasp_penalty=include_grasp_penalty,
         )
 

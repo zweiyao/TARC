@@ -1,35 +1,32 @@
 #!/usr/bin/env python3
-"""RLPD training entry point for the tarc task, on real hardware.
+"""RLPD training entry point for the tarc task.
 
 A fork of train_rlpd.py rather than a flag on it, because that file is shared by
 four tasks. Four things differ; everything else is the original.
 
-  1. puts examples/ and the repo root on sys.path, for `experiments`, `tactile`
-     and `vla`
+  1. installs the fake hardware sources when TARC_FAKE_SOURCES is set
   2. passes tactile_keys / action_chunk_key when building the agent
-  3. classifier=False — reward comes from KeyboardRewardWrapper, so there is no
-     classifier_ckpt/ to collect data for and train first
+  3. classifier=False — reward comes from KeyboardRewardWrapper
   4. does not block on input() when the checkpoint directory exists
-
-Prerequisites, all of which must be up before this starts:
-
-  - franka_server (robot_servers/launch_right_server.sh), matching
-    EnvConfig.SERVER_URL
-  - tactile/capture.py, holding /dev/video0 and publishing to shared memory
-  - vla/serve_pi05.sh, in its own conda env
-
-train_rlpd_tarc_fake.py stands in the arm, the cameras and the SpaceMouse.
-It does not stand in pi0.5 — that service is needed either way.
 """
 import os
 import sys
 from pathlib import Path
 
-# Launched as ../../train_rlpd_tarc.py from the task directory, so sys.path[0]
-# is this file's own directory, examples/ — which covers `experiments` but not
-# `tactile` or `vla` at the repo root. Add both explicitly.
+# run_*.sh launch this from the task directory, so sys.path[0] is
+# experiments/tarc/. examples/ is where `experiments` lives; the repo root is
+# where `tactile` and `vla` live. Both are needed whether or not the fakes are
+# in play.
 _here = Path(__file__).resolve()
 sys.path[:0] = [str(_here.parent), str(_here.parents[1])]
+
+# Before anything that reaches franka_env: the camera and SpaceMouse drivers
+# are imported at module scope, so the swap has to happen first, and
+# experiments.mappings below pulls all of that in.
+if os.environ.get("TARC_FAKE_SOURCES"):
+    from experiments.tarc.fake import install
+
+    install()
 
 import glob
 import time
@@ -45,6 +42,8 @@ from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
 
 from serl_launcher.agents.continuous.sac import SACAgent
+from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSingleArm
+from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
 from serl_launcher.utils.timer_utils import Timer
 from serl_launcher.utils.train_utils import concat_batches
 
@@ -53,6 +52,8 @@ from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
     make_sac_pixel_agent,
+    make_sac_pixel_agent_hybrid_single_arm,
+    make_sac_pixel_agent_hybrid_dual_arm,
     make_trainer_config,
     make_wandb_logger,
 )
@@ -127,8 +128,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                         time_list.append(dt)
                         print(dt)
 
-                    # reward is SUCCESS_REWARD (10), not 1 — count episodes.
-                    success_counter += bool(reward)
+                    success_counter += reward
                     print(reward)
                     print(f"{success_counter}/{episode + 1}")
 
@@ -136,12 +136,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         print(f"average time: {np.mean(time_list)}")
         return  # after done eval, return and exit
     
-    # The upstream one-liner assumes buffer/*.pkl exists whenever the checkpoint
-    # directory does. It does not: the learner creates the directory when it
-    # first saves, and the actor only writes buffer/ every buffer_period steps,
-    # so a restart in between used to die on natsorted([])[-1].
-    _dumps = natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path or "", "buffer/*.pkl")))
-    start_step = int(os.path.basename(_dumps[-1])[12:-4]) + 1 if _dumps else 0
+    start_step = (
+        int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
+        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
+        else 0
+    )
 
     datastore_dict = {
         "actor_env": data_store,
@@ -274,15 +273,12 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     """
     The learner loop, which runs when "--learner" is set to True.
     """
-    # Same shape as the actor's, and the same trap: the directory can exist with
-    # no checkpoint_* inside it (the actor creates it for buffer dumps long
-    # before the learner saves), and basename(None) raises.
-    _latest = (
-        checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
+    start_step = (
+        int(os.path.basename(checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path)))[11:])
+        + 1
         if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else None
+        else 0
     )
-    start_step = int(os.path.basename(_latest)[11:]) + 1 if _latest else 0
     step = start_step
 
     def stats_callback(type: str, payload: dict) -> dict:
@@ -433,16 +429,26 @@ def main(_):
             discount=config.discount,
         )
         include_grasp_penalty = False
-    elif config.setup_mode in ('single-arm-learned-gripper', 'dual-arm-learned-gripper'):
-        # make_sac_pixel_agent_hybrid_* do not take tactile_keys or
-        # action_chunk_key at all (launcher.py:103-151), so going down this
-        # branch would build a 576-wide actor and drop both modalities without
-        # raising. Fail loudly instead of training on cameras alone.
-        raise NotImplementedError(
-            f"setup_mode={config.setup_mode} cannot carry tactile or the action "
-            "chunk yet: make_sac_pixel_agent_hybrid_* has no parameter for "
-            "either. Use single-arm-fixed-gripper, or add them there first."
+    elif config.setup_mode == 'single-arm-learned-gripper':
+        agent: SACAgentHybridSingleArm = make_sac_pixel_agent_hybrid_single_arm(
+            seed=FLAGS.seed,
+            sample_obs=env.observation_space.sample(),
+            sample_action=env.action_space.sample(),
+            image_keys=config.image_keys,
+            encoder_type=config.encoder_type,
+            discount=config.discount,
         )
+        include_grasp_penalty = True
+    elif config.setup_mode == 'dual-arm-learned-gripper':
+        agent: SACAgentHybridDualArm = make_sac_pixel_agent_hybrid_dual_arm(
+            seed=FLAGS.seed,
+            sample_obs=env.observation_space.sample(),
+            sample_action=env.action_space.sample(),
+            image_keys=config.image_keys,
+            encoder_type=config.encoder_type,
+            discount=config.discount,
+        )
+        include_grasp_penalty = True
     else:
         raise NotImplementedError(f"Unknown setup mode: {config.setup_mode}")
 
@@ -460,13 +466,10 @@ def main(_):
             agent.state,
         )
         agent = agent.replace(state=ckpt)
-        # latest_checkpoint returns None when the directory exists but holds no
-        # checkpoint_* yet — os.path.basename(None) then raises TypeError.
-        _latest = checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
-        if _latest is None:
-            print_green("Checkpoint directory has no checkpoint yet; starting fresh.")
-        else:
-            print_green(f"Loaded previous checkpoint at step {os.path.basename(_latest)[11:]}.")
+        ckpt_number = os.path.basename(
+            checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
+        )[11:]
+        print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
 
     def create_replay_buffer_and_wandb_logger():
         replay_buffer = MemoryEfficientReplayBufferDataStore(

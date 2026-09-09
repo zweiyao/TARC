@@ -188,6 +188,22 @@ class TactileVLAWrapper(gym.ObservationWrapper):
         obs[self.action_chunk_key] = self.action_chunk_fn(obs)
         return obs
 
+    def reset(self, **kwargs):
+        """Force a fresh action chunk at the episode boundary.
+
+        The live source publishes asynchronously, so without this the first
+        couple of steps of every episode carry the chunk computed at the *end*
+        of the previous one — a plan for an arm that was somewhere else. reset()
+        already spends seconds in interpolate_move, so the blocking inference is
+        free here. Sources without a refresh() (the synthetic lambdas) are
+        unaffected.
+        """
+        obs, info = super().reset(**kwargs)
+        refresh = getattr(self.action_chunk_fn, "refresh", None)
+        if refresh is not None:
+            obs[self.action_chunk_key] = refresh(obs)
+        return obs, info
+
 
 class KeyboardRewardWrapper(gym.Wrapper):
     """Reward from a human at the keyboard, in place of a trained classifier.

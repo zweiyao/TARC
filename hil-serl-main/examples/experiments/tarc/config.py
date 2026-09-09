@@ -16,7 +16,11 @@ from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
-from experiments.tarc.wrapper import TarcEnv, TactileVLAWrapper
+from experiments.tarc.wrapper import (
+    TarcEnv,
+    TactileVLAWrapper,
+    KeyboardRewardWrapper,
+)
 
 class EnvConfig(DefaultEnvConfig):
     # 5010 on loopback, not the 127.0.0.2:5000 ram_insertion uses: that alias
@@ -142,6 +146,12 @@ class TrainConfig(DefaultTrainingConfig):
     # suits tactile.
     tactile_keys = ["tactile"]
     action_chunk_key = "action_chunk"
+    # tactile is deliberately outside image_keys, so the buffer keeps a full
+    # copy in both observations and next_observations rather than reusing
+    # frames. At the 200000 default that is ~92 GB of np.empty for the tactile
+    # channel alone, times four buffers across actor and learner. Raise this
+    # when a real arm is attached and the tactile resolution is settled.
+    replay_buffer_capacity = 2000
     classifier_keys = ["wrist_1", "wrist_2"]
     proprio_keys = ["tcp_pose", "tcp_vel", "tcp_force", "tcp_torque", "gripper_pose"]
     buffer_period = 1000
@@ -169,18 +179,10 @@ class TrainConfig(DefaultTrainingConfig):
         env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
-        if classifier:
-            classifier = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("classifier_ckpt/"),
-            )
-
-            def reward_func(obs):
-                sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)) > 0.85 and obs['state'][0, 6] > 0.04)
-
-            env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
+        # A human at the keyboard judges success instead of a trained
+        # classifier, so there is no classifier_ckpt/ to collect data for and
+        # train first. `classifier` is kept in the signature because
+        # DefaultTrainingConfig declares it and the other entry points pass it,
+        # but it no longer selects anything.
+        env = KeyboardRewardWrapper(env)
         return env

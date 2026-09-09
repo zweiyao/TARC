@@ -184,3 +184,76 @@ class TactileVLAWrapper(gym.ObservationWrapper):
         obs["images"][self.tactile_key] = self.tactile_fn()
         obs[self.action_chunk_key] = self.action_chunk_fn(obs)
         return obs
+
+
+class KeyboardRewardWrapper(gym.Wrapper):
+    """Reward from a human at the keyboard, in place of a trained classifier.
+
+    Same shape as MultiCameraBinaryRewardClassifierWrapper
+    (franka_env/envs/wrappers.py:36), minus the checkpoint: the operator judges
+    success instead of a network.
+
+        0      -> reward 0
+        space  -> reward SUCCESS_REWARD, and the episode ends
+
+    With no usable keyboard the reward is a constant `fallback`, which defaults
+    to 0 rather than something positive on purpose: franka_env.py:236 computes
+    `done = ... or reward or ...`, so any non-zero constant would end every
+    episode after one step, and each reset walks interpolate_move through dozens
+    of HTTP calls. At 0 the episode runs to MAX_EPISODE_LENGTH, which is what
+    the classifier-less path already did.
+    """
+
+    SUCCESS_REWARD = 10.0
+
+    def __init__(self, env, fallback=0.0):
+        super().__init__(env)
+        self.fallback = fallback
+        self._pending = None
+        self.enabled = self._start_listener()
+        if not self.enabled:
+            print(
+                f"[KeyboardRewardWrapper] no keyboard available; reward is a "
+                f"constant {fallback}"
+            )
+
+    def _start_listener(self):
+        try:
+            import pynput
+            from pynput import keyboard
+        except Exception:
+            return False
+        # The fake sources install a stub whose Listener never delivers events.
+        if getattr(pynput, "_TARC_STUB", False):
+            return False
+
+        def on_press(key):
+            if key == keyboard.Key.space:
+                self._pending = self.SUCCESS_REWARD
+            elif getattr(key, "char", None) == "0":
+                self._pending = 0.0
+
+        try:
+            keyboard.Listener(on_press=on_press).start()
+        except Exception:
+            return False
+        return True
+
+    def compute_reward(self, obs):
+        if not self.enabled:
+            return self.fallback
+        rew, self._pending = self._pending, None
+        return self.fallback if rew is None else rew
+
+    def step(self, action):
+        obs, rew, done, truncated, info = self.env.step(action)
+        rew = self.compute_reward(obs)
+        done = done or bool(rew)
+        info["succeed"] = bool(rew)
+        return obs, rew, done, truncated, info
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        self._pending = None
+        info["succeed"] = False
+        return obs, info

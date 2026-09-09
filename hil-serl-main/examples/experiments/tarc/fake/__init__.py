@@ -77,6 +77,11 @@ def _stub_pynput():
     )
     m = types.ModuleType("pynput")
     m.keyboard = keyboard
+    # Marked so KeyboardRewardWrapper can tell "nobody is listening" from
+    # "nobody pressed a key" — behaviourally those are identical, and guessing
+    # would mean silently reporting reward 0 forever on a machine where the
+    # keyboard actually works.
+    m._TARC_STUB = True
     sys.modules["pynput"] = m
     sys.modules["pynput.keyboard"] = keyboard
 
